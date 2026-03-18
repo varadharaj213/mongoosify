@@ -1,0 +1,37 @@
+{
+  "name": "mongoosify",
+  "version": "1.0.0",
+  "description": "A Mongoose-like ODM for MongoDB — built from scratch",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "files": [
+    "src/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "jest --forceExit",
+    "test:watch": "jest --watch"
+  },
+  "keywords": [
+    "mongodb",
+    "odm",
+    "mongoose",
+    "database",
+    "schema",
+    "model"
+  ],
+  "author": "varadharaj",
+  "license": "MIT",
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "dependencies": {
+    "mongodb": "^6.0.0"
+  },
+  "devDependencies": {
+    "jest": "^29.0.0"
+  }
+}
