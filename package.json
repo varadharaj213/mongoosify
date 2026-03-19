@@ -1,5 +1,5 @@
 {
-  "name": "mongoosify",
+  "name": "varadharajcredopay",
   "version": "1.0.0",
   "description": "A Mongoose-like ODM for MongoDB — built from scratch",
   "main": "src/index.js",

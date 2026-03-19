@@ -109,14 +109,14 @@ class Connection extends EventEmitter {
 
   // ─── model() (on connection, like conn.model()) ───────────────────────
 
-  model(name, schema) {
+  model(name, schema, collectionName) {
     if (!schema) {
       if (this._models[name]) return this._models[name];
       throw new Error(`Mongoosify: Model "${name}" not found on this connection.`);
     }
     if (this._models[name]) return this._models[name];
     const createModel = require('./model');
-    const Model = createModel(name, schema);
+    const Model = createModel(name, schema, this, collectionName);
     this._models[name] = Model;
     return Model;
   }

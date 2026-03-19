@@ -56,7 +56,7 @@ const mongoosify = {
    * mongoose.model(name, schema) — register + return Model
    * mongoose.model(name)         — retrieve existing Model
    */
-  model(name, schema) {
+  model(name, schema, collectionName) {
     if (!schema) {
       // Retrieve
       if (connection._models[name]) return connection._models[name];
@@ -71,7 +71,7 @@ const mongoosify = {
       return connection._models[name];
     }
 
-    const Model = createModel(name, schema);
+    const Model = createModel(name, schema, connection, collectionName);
     connection._models[name] = Model;
 
     // Auto-index on next tick (like Mongoose's autoIndex)

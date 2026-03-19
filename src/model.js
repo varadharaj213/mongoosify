@@ -8,7 +8,10 @@ const connection = require('./connection');
 // ─── Model factory ────────────────────────────────────────────────────────────
 // Returns a Model class — exactly how Mongoose does it.
 
-function createModel(modelName, schema) {
+function createModel(modelName, schema, conn, explicitCollectionName) {
+
+  // Use the provided connection, or fall back to the default singleton
+  const modelConnection = conn || connection;
 
   // The Model constructor doubles as Document constructor (like Mongoose)
   class Model {
@@ -21,24 +24,30 @@ function createModel(modelName, schema) {
 
   Model.modelName = modelName;
   Model.schema    = schema;
-  Model.base      = connection;   // reference to mongoose-level singleton
+  Model.base      = modelConnection;   // reference to the connection this model belongs to
 
-  // Collection name: pluralised, lowercased model name (can be overridden in schema options)
-  const collectionName = schema.collectionName(modelName);
+  // Collection name resolution (priority order):
+  // 1. Explicit third argument to conn.model(name, schema, collectionName)
+  // 2. schema.options.collection
+  // 3. The model name itself (lowercased) — Mongoose uses the model name as-is
+  //    when it already looks like a collection name
+  const collectionName = explicitCollectionName
+    || schema.options.collection
+    || modelName.toLowerCase();
 
   Object.defineProperty(Model, 'collection', {
-    get() { return connection.getDb().collection(collectionName); },
+    get() { return modelConnection.getDb().collection(collectionName); },
   });
 
   Object.defineProperty(Model, 'db', {
-    get() { return connection.getDb(); },
+    get() { return modelConnection.getDb(); },
   });
 
   // ─── Connection buffering ───────────────────────────────────────────────
   // Like Mongoose: queue operations until connected.
 
   Model._waitForConnection = function () {
-    if (connection.readyState === 1) return Promise.resolve();
+    if (modelConnection.readyState === 1) return Promise.resolve();
     return new Promise((resolve, reject) => {
       const timeout = schema.options.bufferTimeoutMS || 10000;
       const timer = setTimeout(() => {
@@ -46,8 +55,8 @@ function createModel(modelName, schema) {
           `Mongoosify: Operation on model "${modelName}" buffered for ${timeout}ms without connecting.`
         ));
       }, timeout);
-      connection.once('connected', () => { clearTimeout(timer); resolve(); });
-      connection.once('error',     (e) => { clearTimeout(timer); reject(e); });
+      modelConnection.once('connected', () => { clearTimeout(timer); resolve(); });
+      modelConnection.once('error',     (e) => { clearTimeout(timer); reject(e); });
     });
   };
 

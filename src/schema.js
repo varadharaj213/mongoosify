@@ -174,6 +174,38 @@ class Schema {
     return this;
   }
 
+  /**
+   * Returns all indexes defined on this schema as an array of
+   * [fields, options] tuples — compatible with mongoose-unique-validator
+   * and other plugins that call schema.indexes().
+   */
+  indexes() {
+    const result = [];
+
+    // 1. Collect indexes defined via schema.index(...)
+    for (const idx of this._indexes) {
+      result.push([idx.fields, idx.options]);
+    }
+
+    // 2. Collect indexes declared inline on individual paths
+    //    e.g. { email: { type: String, unique: true, index: true } }
+    for (const [pathName, schemaType] of Object.entries(this.paths)) {
+      const opts = schemaType._options || schemaType.options || {};
+      if (opts.unique) {
+        const idxFields = { [pathName]: 1 };
+        const idxOpts   = { unique: true };
+        if (opts.sparse)  idxOpts.sparse  = true;
+        result.push([idxFields, idxOpts]);
+      } else if (opts.index && typeof opts.index === 'object' && opts.index.unique) {
+        const idxFields = { [pathName]: 1 };
+        const idxOpts   = { unique: true, ...opts.index };
+        result.push([idxFields, idxOpts]);
+      }
+    }
+
+    return result;
+  }
+
   // ─── Plugins ────────────────────────────────────────────────────────────────
 
   plugin(fn, opts) {
