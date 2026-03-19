@@ -23,6 +23,36 @@ class Connection extends EventEmitter {
     this.STATES     = STATES;
   }
 
+  // ─── name property (Mongoose compatibility: connection.name / db.name) ────
+
+  get name() {
+    return this._dbName || '';
+  }
+
+  // ─── host property ────────────────────────────────────────────────────
+
+  get host() {
+    if (!this._uri) return '';
+    try {
+      const url = new URL(this._uri);
+      return url.hostname;
+    } catch {
+      return '';
+    }
+  }
+
+  // ─── port property ─────────────���──────────────────────────────────────
+
+  get port() {
+    if (!this._uri) return 0;
+    try {
+      const url = new URL(this._uri);
+      return parseInt(url.port) || 27017;
+    } catch {
+      return 27017;
+    }
+  }
+
   // ─── connect() ────────────────────────────────────────────────────────
 
   async connect(uri, options = {}) {

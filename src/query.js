@@ -19,9 +19,34 @@ class Query {
     this._comment    = null;
     this._distinct   = null;
     this._updateOptions = {};
+    this._collation  = null;
 
     this._executed   = false;
     this._promise    = null;
+  }
+
+  // ─── Mongoose-compatible property accessors ───────────────────────────────
+
+  /** mongoose.Query compatibility: this.model gives the Model */
+  get model() {
+    return this._model;
+  }
+
+  /** mongoose.Query compatibility: this.op gives the operation name */
+  get op() {
+    return this._op;
+  }
+
+  // ─── getQuery() / getFilter() — Mongoose compatibility ───────────────────
+
+  /** Returns the current filter/query conditions (Mongoose-compatible) */
+  getQuery() {
+    return this._filter;
+  }
+
+  /** Alias for getQuery() */
+  getFilter() {
+    return this._filter;
   }
 
   // ─── Chainable methods ────────────────────────────────────────────────────
@@ -35,7 +60,7 @@ class Query {
         if (f.startsWith('-')) this._projection[f.slice(1)] = 0;
         else this._projection[f] = 1;
       }
-    } else {
+    } else if (fields && typeof fields === 'object') {
       this._projection = fields;
     }
     return this;
@@ -67,14 +92,25 @@ class Query {
 
   comment(c) { this._comment = c; return this; }
 
+  collation(c) { this._collation = c; return this; }
+
   where(path, val) {
-    if (val !== undefined) this._filter[path] = val;
+    if (typeof path === 'object') {
+      Object.assign(this._filter, path);
+    } else if (val !== undefined) {
+      this._filter[path] = val;
+    }
     return this;
   }
 
   populate(path, select) {
     if (typeof path === 'string') {
       this._populate.push({ path, select });
+    } else if (Array.isArray(path)) {
+      for (const p of path) {
+        if (typeof p === 'string') this._populate.push({ path: p });
+        else if (p && typeof p === 'object') this._populate.push(p);
+      }
     } else if (path && typeof path === 'object') {
       this._populate.push(path);
     }
@@ -83,7 +119,18 @@ class Query {
 
   distinct(field) { this._distinct = field; return this; }
 
-  // ─── Update-query helpers ─────────────────────────────────────────────────
+  /**
+   * Chain .countDocuments() on a find query — like Mongoose allows:
+   *   Model.find(query).countDocuments()
+   */
+  countDocuments() {
+    this._op = 'countDocuments';
+    // Reset promise so it re-executes with new op
+    this._promise = null;
+    return this;
+  }
+
+  // ─── Update-query helpers ──────────────────������─────────────────────────────
 
   setUpdate(update, options = {}) {
     this._update = update;
@@ -101,6 +148,9 @@ class Query {
   then(resolve, reject) { return this.exec().then(resolve, reject); }
   catch(fn) { return this.exec().catch(fn); }
   finally(fn) { return this.exec().finally(fn); }
+
+  // Symbol.toPrimitive and async iterator not needed but adding toJSON for safety
+  toJSON() { return this.exec(); }
 
   async _execute() {
     // Buffer: wait for connection if not yet connected
@@ -129,6 +179,7 @@ class Query {
     if (this._hint)       cursor = cursor.hint(this._hint);
     if (this._maxTimeMS)  cursor = cursor.maxTimeMS(this._maxTimeMS);
     if (this._comment)    cursor = cursor.comment(this._comment);
+    if (this._collation)  cursor = cursor.collation(this._collation);
 
     const docs = await cursor.toArray();
 
@@ -152,6 +203,7 @@ class Query {
     if (this._projection) opts.projection = this._projection;
     if (this._sort)       opts.sort = this._sort;
     if (this._skip)       opts.skip = this._skip;
+    if (this._collation)  opts.collation = this._collation;
 
     const doc = await this._model.collection.findOne(this._filter, opts);
     if (!doc) return null;

@@ -21,7 +21,11 @@ class Document {
     this._assignData(data);
 
     // Snapshot for dirty-check
-    this.$__original = JSON.parse(JSON.stringify(this._toRaw()));
+    try {
+      this.$__original = JSON.parse(JSON.stringify(this._toRaw()));
+    } catch {
+      this.$__original = {};
+    }
 
     // Bind instance methods from schema
     for (const [name, fn] of Object.entries(schema.methods)) {
@@ -45,16 +49,18 @@ class Document {
 
   _applyVirtuals() {
     for (const [name, descriptor] of Object.entries(this.$__schema.virtuals)) {
-      Object.defineProperty(this, name, {
-        get: descriptor.get ? descriptor.get.bind(this) : undefined,
-        set: descriptor.set ? descriptor.set.bind(this) : undefined,
-        enumerable: false,   // virtuals do NOT appear in toObject() by default
-        configurable: true,
-      });
+      if (descriptor.get || descriptor.set) {
+        Object.defineProperty(this, name, {
+          get: descriptor.get ? descriptor.get.bind(this) : undefined,
+          set: descriptor.set ? descriptor.set.bind(this) : undefined,
+          enumerable: false,   // virtuals do NOT appear in toObject() by default
+          configurable: true,
+        });
+      }
     }
   }
 
-  // ─── get / set (Mongoose-style) ─────────────────────────────────────────
+  // ─── get / set (Mongoose-style) ────────────────────────────────────────��
 
   get(path) {
     const parts = path.split('.');
@@ -105,7 +111,7 @@ class Document {
   // ─── save ────────────────────────────────────────────────────────────────
 
   async save() {
-    // Run pre('save') hooks
+    // Run pre('save') hooks (supports regex hooks via getHooks)
     await this._runHooks('pre', 'save');
 
     const plain = this._toRaw();
@@ -170,8 +176,11 @@ class Document {
     return raw;
   }
 
-  toJSON() {
-    return this.toObject();
+  toJSON(options) {
+    // Merge schema-level toJSON options
+    const schemaToJSON = this.$__schema.options.toJSON || {};
+    const merged = { ...schemaToJSON, ...(options || {}) };
+    return this.toObject(merged);
   }
 
   _toRaw() {
@@ -193,9 +202,14 @@ class Document {
   inspect() { return this.toObject(); }
 
   // ─── Hooks runner ────────────────────────────────────────────────────────
+  // Now uses schema.getHooks() which supports both exact and regex-matched hooks
 
   async _runHooks(type, event) {
-    const hooks = (this.$__schema._hooks[type][event]) || [];
+    // Use getHooks if available (supports regex patterns), fallback to direct lookup
+    const hooks = this.$__schema.getHooks
+      ? this.$__schema.getHooks(type, event)
+      : (this.$__schema._hooks[type][event] || []);
+
     for (const fn of hooks) {
       await new Promise((resolve, reject) => {
         const result = fn.call(this, (err) => { if (err) reject(err); else resolve(); });

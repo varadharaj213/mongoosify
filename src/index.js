@@ -1,12 +1,12 @@
 'use strict';
 
 /**
- * mongoosify — A Mongoose-like ODM for MongoDB
+ * varadharajcredopay — A Mongoose-compatible ODM for MongoDB
  *
- * Drop-in compatible API:
- *   const mongoose = require('mongoosify');
- *   ↓
- *   const mongoose = require('mongoosify');
+ * Drop-in replacement:
+ *   const mongoose = require('mongoose');
+ *   →
+ *   const mongoose = require('varadharajcredopay');
  */
 
 const connection  = require('./connection');
@@ -14,6 +14,7 @@ const Schema      = require('./schema');
 const SchemaTypes = require('./schematype');
 const createModel = require('./model');
 const Document    = require('./document');
+const Query       = require('./query');
 
 // ─── Global settings (mongoose.set / mongoose.get) ────────────────────────────
 
@@ -25,14 +26,25 @@ const _settings = {
   bufferTimeoutMS : 10000,
 };
 
+// ─── Debug callback support ───────────────────────────────────────────────────
+// mongoose.set("debug", fn) — stores the callback for debug logging
+
+let _debugCallback = null;
+
 // ─── mongoosify object ────────────────────────────────────────────────────────
 
 const mongoosify = {
 
   // ─── Connection ─────────────────────────────────────────────────────────
 
+  /**
+   * connect() — Mongoose-compatible.
+   * Returns a thenable that resolves to `this` (the mongoosify object).
+   * `this.connection` gives the default connection — matching Mongoose's
+   * `mongoose.connect(uri).then(db => db.connection.collection(...))`
+   */
   connect(uri, options = {}) {
-    return connection.connect(uri, options);
+    return connection.connect(uri, options).then(() => mongoosify);
   },
 
   disconnect() {
@@ -61,8 +73,8 @@ const mongoosify = {
       // Retrieve
       if (connection._models[name]) return connection._models[name];
       throw new Error(
-        `Mongoosify: Schema hasn't been registered for model "${name}".\n` +
-        `Use mongoosify.model(name, schema) to register it first.`
+        `Schema hasn't been registered for model "${name}".\n` +
+        `Use mongoose.model(name, schema) to register it first.`
       );
     }
 
@@ -95,11 +107,12 @@ const mongoosify = {
     return Object.keys(connection._models);
   },
 
-  // ─── Schema & Types ─────────────────────────────────────────────────────
+  // ─── Schema & Types ─────────����──────────────────────────────────────────
 
   Schema,
   SchemaTypes,
   Document,
+  Query,
 
   /** mongoose.Types — ObjectId, etc. */
   get Types() {
@@ -121,8 +134,24 @@ const mongoosify = {
 
   // ─── Global settings ────────────────────────────────────────────────────
 
+  /**
+   * mongoose.set(key, value)
+   * Supports:
+   *   mongoose.set("debug", true)
+   *   mongoose.set("debug", function(collectionName, method, query) { ... })
+   */
   set(key, value) {
     _settings[key] = value;
+
+    // Special handling for "debug" — support callback function
+    if (key === 'debug') {
+      if (typeof value === 'function') {
+        _debugCallback = value;
+      } else {
+        _debugCallback = value ? _defaultDebugLogger : null;
+      }
+    }
+
     return this;
   },
 
@@ -155,6 +184,26 @@ const mongoosify = {
     this._globalPlugins.push({ fn, opts });
     return this;
   },
+
+  // ─── isValidObjectId / isObjectIdOrHexString ────────────────────────────
+
+  isValidObjectId(id) {
+    if (!id) return false;
+    const { ObjectId } = require('mongodb');
+    if (id instanceof ObjectId) return true;
+    if (typeof id === 'string' && /^[0-9a-fA-F]{24}$/.test(id)) return true;
+    return false;
+  },
+
+  isObjectIdOrHexString(id) {
+    return this.isValidObjectId(id);
+  },
 };
+
+// ─── Default debug logger ─────────────────────────────────────────────────────
+
+function _defaultDebugLogger(collectionName, method, query) {
+  console.log(`Mongoose: ${collectionName}.${method}(${JSON.stringify(query)})`);
+}
 
 module.exports = mongoosify;
