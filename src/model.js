@@ -357,31 +357,124 @@ function createModel(modelName, schema, conn, explicitCollectionName) {
   };
 
   // ─── populate() — static ────────────────────────────────────────────────
+  // Supports both direct ref populate AND virtual populate (like Mongoose).
+  // Virtual populate: schema.virtual('name', { ref, localField, foreignField, justOne })
 
   Model.populate = async function (docs, options) {
     if (!docs) return docs;
     const arr = Array.isArray(docs) ? docs : [docs];
     const opts = typeof options === 'string' ? { path: options } : options;
+    const popPath = opts.path;
+    const popModel = opts.model; // explicit model override (Mongoose-style)
+    const popSelect = opts.select;
+    const nestedPopulate = opts.populate; // nested populate
 
-    // Get the referenced model
-    const schemaDef = schema.paths[opts.path];
-    const refModelName = schemaDef && schemaDef.options && schemaDef.options.ref;
-    if (!refModelName) return docs;
+    // 1. Try direct ref on schema path
+    const schemaDef = schema.paths[popPath];
+    const directRef = schemaDef && schemaDef.options && schemaDef.options.ref;
 
-    // Look up model in the same connection first, then default connection
-    const refModel = modelConnection._models[refModelName] || connection._models[refModelName];
-    if (!refModel) return docs;
+    if (directRef || popModel) {
+      const refModelName = popModel || directRef;
+      const refModel = _resolveModel(refModelName);
+      if (refModel) {
+        const ids = arr.map(d => _getNestedValue(d, popPath)).filter(Boolean);
+        if (ids.length) {
+          const findFilter = { _id: { $in: ids } };
+          let refDocs;
+          if (popSelect) {
+            refDocs = await refModel.collection.find(findFilter).project(typeof popSelect === 'string' ? _parseSelect(popSelect) : popSelect).toArray();
+          } else {
+            refDocs = await refModel.collection.find(findFilter).toArray();
+          }
+          const map = {};
+          for (const ref of refDocs) map[ref._id.toString()] = ref;
+          for (const doc of arr) {
+            const val = _getNestedValue(doc, popPath);
+            if (val) {
+              const resolved = map[val.toString()] || val;
+              _setNestedValue(doc, popPath, resolved);
+              // Handle nested populate on the resolved doc
+              if (nestedPopulate && resolved && typeof resolved === 'object') {
+                const nestedPops = Array.isArray(nestedPopulate) ? nestedPopulate : [nestedPopulate];
+                for (const np of nestedPops) {
+                  const npOpts = typeof np === 'string' ? { path: np } : np;
+                  if (npOpts.model) {
+                    const nestedRefModel = _resolveModel(npOpts.model);
+                    if (nestedRefModel) {
+                      await _populateSingleDoc(resolved, npOpts, nestedRefModel);
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+        return docs;
+      }
+    }
 
-    const ids = arr.map(d => d[opts.path]).filter(Boolean);
-    if (!ids.length) return docs;
+    // 2. Try virtual populate — search all virtuals on this schema AND nested sub-schemas
+    const virtualPopResult = _findVirtualPopulate(schema, popPath);
+    if (virtualPopResult) {
+      const { ref, localField, foreignField, justOne } = virtualPopResult;
+      // Compute the full localField path by using the populate path's prefix
+      // e.g. popPath = "finalDetails.salesInformation.payFacFinal"
+      //      localField from virtual = "aggregator"
+      //      fullLocalField = "finalDetails.salesInformation.aggregator"
+      const pathParts = popPath.split('.');
+      const prefix = pathParts.slice(0, pathParts.length - 1).join('.');
+      const fullLocalField = prefix ? `${prefix}.${localField}` : localField;
 
-    const refDocs = await refModel.find({ _id: { $in: ids } });
-    const map = {};
-    for (const ref of refDocs) map[ref._id.toString()] = ref;
-
-    for (const doc of arr) {
-      if (doc[opts.path]) {
-        doc[opts.path] = map[doc[opts.path].toString()] || doc[opts.path];
+      const refModel = _resolveModel(ref);
+      if (refModel) {
+        // Collect all local field values from docs using the full path
+        const localValues = arr.map(d => _getNestedValue(d, fullLocalField)).filter(v => v != null);
+        if (localValues.length) {
+          let refDocs;
+          if (popSelect) {
+            refDocs = await refModel.collection.find({ [foreignField]: { $in: localValues } })
+              .project(typeof popSelect === 'string' ? _parseSelect(popSelect) : popSelect).toArray();
+          } else {
+            refDocs = await refModel.collection.find({ [foreignField]: { $in: localValues } }).toArray();
+          }
+          // Build map: foreignField value → doc(s)
+          const map = {};
+          for (const ref of refDocs) {
+            const key = ref[foreignField] ? ref[foreignField].toString() : '';
+            if (justOne) {
+              if (!map[key]) map[key] = ref;
+            } else {
+              if (!map[key]) map[key] = [];
+              map[key].push(ref);
+            }
+          }
+          for (const doc of arr) {
+            const localVal = _getNestedValue(doc, fullLocalField);
+            if (localVal != null) {
+              const key = localVal.toString();
+              const resolved = map[key] || (justOne ? null : []);
+              _setNestedValue(doc, popPath, resolved);
+              // Handle nested populate
+              if (nestedPopulate && resolved && typeof resolved === 'object') {
+                const resolvedArr = Array.isArray(resolved) ? resolved : [resolved];
+                const nestedPops = Array.isArray(nestedPopulate) ? nestedPopulate : [nestedPopulate];
+                for (const rDoc of resolvedArr) {
+                  if (!rDoc) continue;
+                  for (const np of nestedPops) {
+                    const npOpts = typeof np === 'string' ? { path: np } : np;
+                    if (npOpts.model) {
+                      const nestedRefModel = _resolveModel(npOpts.model);
+                      if (nestedRefModel) {
+                        await _populateSingleDoc(rDoc, npOpts, nestedRefModel);
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+        return docs;
       }
     }
 
@@ -391,6 +484,123 @@ function createModel(modelName, schema, conn, explicitCollectionName) {
   Model._populateDoc = async function (doc, pop) {
     await Model.populate(doc, pop);
   };
+
+  // ─── Virtual populate helpers ───────────────────────────────────────────
+
+  /**
+   * Recursively search schema and nested sub-schemas for a virtual populate
+   * definition matching the given dot-notation path.
+   * e.g. path = "finalDetails.salesInformation.payFacFinal"
+   */
+  function _findVirtualPopulate(schemaObj, path) {
+    if (!schemaObj || !path) return null;
+
+    // Direct match on this schema's virtuals
+    if (schemaObj.virtuals[path] && schemaObj.virtuals[path].options && schemaObj.virtuals[path].options.ref) {
+      return schemaObj.virtuals[path].options;
+    }
+
+    // Extract the leaf name (last segment of dot-notation path)
+    // e.g. "finalDetails.salesInformation.payFacFinal" → "payFacFinal"
+    const parts = path.split('.');
+    const leafName = parts[parts.length - 1];
+
+    // 1. Recursively collect ALL Schema instances from the entire schema tree
+    //    and check each one's virtuals for the leaf name
+    const allSubSchemas = [];
+    _collectAllSubSchemas(schemaObj, allSubSchemas);
+    for (const subSchema of allSubSchemas) {
+      if (subSchema.virtuals[leafName] && subSchema.virtuals[leafName].options && subSchema.virtuals[leafName].options.ref) {
+        return subSchema.virtuals[leafName].options;
+      }
+    }
+
+    // 2. Also scan ALL registered models' schemas (covers cross-model virtuals)
+    const allModels = { ...modelConnection._models, ...connection._models };
+    for (const mName of Object.keys(allModels)) {
+      const m = allModels[mName];
+      if (!m.schema) continue;
+      // Check the model schema itself
+      if (m.schema.virtuals[leafName] && m.schema.virtuals[leafName].options && m.schema.virtuals[leafName].options.ref) {
+        return m.schema.virtuals[leafName].options;
+      }
+      // Check all sub-schemas of this model
+      const modelSubSchemas = [];
+      _collectAllSubSchemas(m.schema, modelSubSchemas);
+      for (const subSchema of modelSubSchemas) {
+        if (subSchema.virtuals[leafName] && subSchema.virtuals[leafName].options && subSchema.virtuals[leafName].options.ref) {
+          return subSchema.virtuals[leafName].options;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Recursively collect all Schema instances from a schema's childSchemas tree.
+   * This walks the entire nested schema hierarchy.
+   */
+  function _collectAllSubSchemas(schemaObj, result, visited) {
+    if (!schemaObj) return;
+    if (!visited) visited = new Set();
+    if (visited.has(schemaObj)) return; // prevent infinite loops
+    visited.add(schemaObj);
+
+    if (schemaObj.childSchemas) {
+      for (const child of schemaObj.childSchemas) {
+        if (child.schema) {
+          result.push(child.schema);
+          _collectAllSubSchemas(child.schema, result, visited);
+        }
+      }
+    }
+  }
+
+  /**
+   * Resolve a model by name or by Model class reference.
+   */
+  function _resolveModel(nameOrModel) {
+    if (!nameOrModel) return null;
+    if (typeof nameOrModel === 'function' && nameOrModel.modelName) return nameOrModel;
+    if (typeof nameOrModel === 'string') {
+      return modelConnection._models[nameOrModel] || connection._models[nameOrModel] || null;
+    }
+    return null;
+  }
+
+  /**
+   * Populate a single plain doc (not a Document instance) with a ref field.
+   */
+  async function _populateSingleDoc(doc, opts, refModel) {
+    const val = _getNestedValue(doc, opts.path);
+    if (!val) return;
+    const findFilter = { _id: val };
+    let refDoc;
+    if (opts.select) {
+      refDoc = await refModel.collection.findOne(findFilter, {
+        projection: typeof opts.select === 'string' ? _parseSelect(opts.select) : opts.select
+      });
+    } else {
+      refDoc = await refModel.collection.findOne(findFilter);
+    }
+    if (refDoc) {
+      _setNestedValue(doc, opts.path, refDoc);
+      // Recurse for nested populate
+      if (opts.populate) {
+        const nestedPops = Array.isArray(opts.populate) ? opts.populate : [opts.populate];
+        for (const np of nestedPops) {
+          const npOpts = typeof np === 'string' ? { path: np } : np;
+          if (npOpts.model) {
+            const nestedRefModel = _resolveModel(npOpts.model);
+            if (nestedRefModel) {
+              await _populateSingleDoc(refDoc, npOpts, nestedRefModel);
+            }
+          }
+        }
+      }
+    }
+  }
 
   // ─── paginate() — Built-in mongoose-paginate-v2 compatible ──────────────
   // This is a built-in implementation so the external plugin is optional.
@@ -630,6 +840,33 @@ function _addTimestamps(update, schema) {
   if (!key) return update;
   if (update.$set) { return { ...update, $set: { ...update.$set, [key]: new Date() } }; }
   return { ...update, $set: { [key]: new Date() } };
+}
+
+function _getNestedValue(obj, path) {
+  if (!obj || !path) return undefined;
+  const parts = path.split('.');
+  let cur = obj;
+  for (const part of parts) {
+    if (cur == null) return undefined;
+    // Support both Document instances (with toObject) and plain objects
+    if (typeof cur.toObject === 'function' && typeof cur[part] === 'undefined') {
+      cur = cur.toObject()[part];
+    } else {
+      cur = cur[part];
+    }
+  }
+  return cur;
+}
+
+function _setNestedValue(obj, path, value) {
+  if (!obj || !path) return;
+  const parts = path.split('.');
+  let cur = obj;
+  for (let i = 0; i < parts.length - 1; i++) {
+    if (cur[parts[i]] == null) cur[parts[i]] = {};
+    cur = cur[parts[i]];
+  }
+  cur[parts[parts.length - 1]] = value;
 }
 
 function _parseSelect(select) {
