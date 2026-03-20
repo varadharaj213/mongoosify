@@ -242,6 +242,14 @@ export class Query<ResultType = any, DocType = any> implements Promise<ResultTyp
 
   readonly model: ModelType<DocType>;
   readonly op: string;
+  /** Set by pre-hooks for timing; read by post-hooks. Mirrors Mongoose behaviour used by mongoose-monitor. */
+  _startTime: number | null;
+  /** Alias for op — Mongoose-compatible query type identifier */
+  readonly mongooseQueryType: string;
+  /** Database name of this query's model — for middleware/logging use */
+  readonly _dbName: string;
+  /** Collection name of this query's model — for middleware/logging use */
+  readonly _collectionName: string;
 
   getQuery(): FilterQuery<DocType>;
   getFilter(): FilterQuery<DocType>;
@@ -515,3 +523,31 @@ export interface Mongoosify {
 declare const mongoosify: Mongoosify;
 export default mongoosify;
 export = mongoosify;
+
+// ─── Named exports ────────────────────────────────────────────────────────────
+// Allows both import styles:
+//   import mongoose from 'varadharajcredopay'
+//   import { Schema, model, ObjectId, SchemaTypes, Document, Query } from 'varadharajcredopay'
+
+export { Schema };
+export { SchemaTypes };
+export { Document };
+export { Query };
+export { ObjectId };
+
+/** Named model() — same as mongoose.model() */
+export declare function model<
+  DocType = any,
+  InstanceMethods = AnyObject,
+  QueryHelpers = AnyObject
+>(
+  name: string,
+  schema?: Schema<DocType, InstanceMethods>,
+  collectionName?: string
+): ModelType<DocType, InstanceMethods, QueryHelpers>;
+
+/** Named connect() */
+export declare function connect(uri: string, options?: AnyObject): Promise<Mongoosify>;
+
+/** Named disconnect() */
+export declare function disconnect(): Promise<Connection>;

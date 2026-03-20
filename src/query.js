@@ -23,6 +23,24 @@ class Query {
 
     this._executed   = false;
     this._promise    = null;
+
+    // Timing support — for mongoose-monitor style: pre hook sets _startTime, post hook reads it
+    this._startTime  = null;
+
+    // mongooseQueryType — Mongoose-compatible property used by some middleware
+    this.mongooseQueryType = op;
+  }
+
+  // ─── Mongoose-monitor compatibility getters ───────────────────────────────
+
+  /** Returns the database name — mirrors Mongoose's query.model.db.name */
+  get _dbName() {
+    try { return this._model.db.databaseName || this._model.db.name || ''; } catch { return ''; }
+  }
+
+  /** Returns the collection name — mirrors Mongoose's query.model.collection.name */
+  get _collectionName() {
+    try { return this._model.collection.collectionName || this._model.collection.name || ''; } catch { return ''; }
   }
 
   // ─── Mongoose-compatible property accessors ───────────────────────────────
@@ -156,17 +174,51 @@ class Query {
     // Buffer: wait for connection if not yet connected
     await this._model._waitForConnection();
 
+    // Run pre-query hooks (schema.pre('find', fn), schema.pre(/.*/, fn), etc.)
+    await this._runQueryHooks('pre', this._op);
+
+    let result;
     switch (this._op) {
-      case 'find':       return this._execFind();
-      case 'findOne':    return this._execFindOne();
+      case 'find':           result = await this._execFind(); break;
+      case 'findOne':        result = await this._execFindOne(); break;
       case 'count':
-      case 'countDocuments': return this._execCount();
-      case 'deleteOne':  return this._model.collection.deleteOne(this._filter);
-      case 'deleteMany': return this._model.collection.deleteMany(this._filter);
-      case 'updateOne':  return this._model.collection.updateOne(this._filter, this._update, this._updateOptions);
-      case 'updateMany': return this._model.collection.updateMany(this._filter, this._update, this._updateOptions);
-      case 'distinct':   return this._model.collection.distinct(this._distinct, this._filter);
+      case 'countDocuments': result = await this._execCount(); break;
+      case 'deleteOne':      result = await this._model.collection.deleteOne(this._filter); break;
+      case 'deleteMany':     result = await this._model.collection.deleteMany(this._filter); break;
+      case 'updateOne':      result = await this._model.collection.updateOne(this._filter, this._update, this._updateOptions); break;
+      case 'updateMany':     result = await this._model.collection.updateMany(this._filter, this._update, this._updateOptions); break;
+      case 'distinct':       result = await this._model.collection.distinct(this._distinct, this._filter); break;
       default: throw new Error(`Unknown query operation: ${this._op}`);
+    }
+
+    // Run post-query hooks — result is passed as first arg (Mongoose-compatible)
+    await this._runQueryHooks('post', this._op, result);
+
+    return result;
+  }
+
+  // ─── Query-level hook runner ──────────────────────────────────────────────
+  // Runs schema pre/post hooks with `this` set to the Query instance.
+  // Supports both exact-match and regex hooks (getHooks).
+
+  async _runQueryHooks(type, event, result) {
+    const schema = this._model && this._model.schema;
+    if (!schema) return;
+
+    const hooks = schema.getHooks
+      ? schema.getHooks(type, event)
+      : (schema._hooks[type][event] || []);
+
+    for (const fn of hooks) {
+      await new Promise((resolve, reject) => {
+        // post hooks receive result as first arg; pre hooks receive only next
+        const args = type === 'post'
+          ? [result, (err) => { if (err) reject(err); else resolve(); }]
+          : [(err) => { if (err) reject(err); else resolve(); }];
+        const ret = fn.apply(this, args);
+        if (ret && typeof ret.then === 'function') ret.then(resolve).catch(reject);
+        else if (fn.length === 0) resolve();
+      });
     }
   }
 

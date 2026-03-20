@@ -206,4 +206,56 @@ function _defaultDebugLogger(collectionName, method, query) {
   console.log(`Mongoose: ${collectionName}.${method}(${JSON.stringify(query)})`);
 }
 
+// ─── Named exports — so both styles work: ────────────────────────────────────
+//   import mongoose from 'varadharajcredopay'           (default)
+//   import { Schema, model, ObjectId } from '...'       (named)
+//   const { Schema, model } = require('...')            (CJS destructure)
+
+mongoosify.Schema      = Schema;
+mongoosify.SchemaTypes = SchemaTypes;
+mongoosify.Document    = Document;
+mongoosify.Query       = Query;
+
+// Named export helpers — bound to the mongoosify context
+mongoosify.model = function (name, schema, collectionName) {
+  if (!schema) {
+    if (connection._models[name]) return connection._models[name];
+    throw new Error(
+      `Schema hasn't been registered for model "${name}".\n` +
+      `Use mongoose.model(name, schema) to register it first.`
+    );
+  }
+  if (connection._models[name]) return connection._models[name];
+  const Model = createModel(name, schema, connection, collectionName);
+  connection._models[name] = Model;
+  if (schema.options.autoIndex !== false && _settings.bufferCommands !== false) {
+    setImmediate(() => {
+      if (connection.readyState === 1) {
+        Model.ensureIndexes().catch(() => {});
+      } else {
+        connection.once('connected', () => { Model.ensureIndexes().catch(() => {}); });
+      }
+    });
+  }
+  return Model;
+};
+
+// ObjectId as a named export shorthand
+mongoosify.ObjectId = require('mongodb').ObjectId;
+
+// Allow: const { Schema, model, ObjectId, SchemaTypes, Document, Query } = require('varadharajcredopay')
+// This works because module.exports IS the mongoosify object which now has all these as own props.
+
 module.exports = mongoosify;
+
+// Named ES module-style exports for TypeScript / ESM interop
+// These must be explicit properties on module.exports for CJS named-import to work
+module.exports.Schema      = Schema;
+module.exports.SchemaTypes = SchemaTypes;
+module.exports.Document    = Document;
+module.exports.Query       = Query;
+module.exports.ObjectId    = require('mongodb').ObjectId;
+module.exports.model       = mongoosify.model;
+module.exports.connect     = (uri, opts) => mongoosify.connect(uri, opts);
+module.exports.disconnect  = () => mongoosify.disconnect();
+module.exports.default     = mongoosify;   // for ESM interop: import mongoose from '...'
