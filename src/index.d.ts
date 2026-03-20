@@ -443,6 +443,29 @@ export class Connection extends EventEmitter {
   getDb(): Db;
   collection(name: string): Collection;
 
+  /**
+   * Map of collection-name → Collection for all model-registered collections.
+   * Mirrors Mongoose's `connection.collections` — safe to use in `for..in` loops.
+   *
+   * ```ts
+   * const cols = mongoose.connection.collections;
+   * for (const key in cols) { await cols[key].deleteMany({}); }
+   * ```
+   */
+  readonly collections: Record<string, Collection>;
+
+  /**
+   * Async version — returns Collection objects for *every* collection that
+   * actually exists in the database. Useful for test teardown:
+   *
+   * ```ts
+   * for (const col of await mongoose.connection.listCollections()) {
+   *   await col.deleteMany({});
+   * }
+   * ```
+   */
+  listCollections(filter?: AnyObject): Promise<Collection[]>;
+
   model<DocType = any>(name: string): ModelType<DocType>;
   model<DocType = any>(name: string, schema: Schema<DocType>, collectionName?: string): ModelType<DocType>;
 

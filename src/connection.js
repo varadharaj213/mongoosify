@@ -168,6 +168,51 @@ class Connection extends EventEmitter {
     return this;
   }
 
+  // ─── collections (Mongoose compatibility) ────────────────────────────────
+  // Returns a Proxy map of { collectionName → Collection } for all model-registered
+  // collections on the DB. Matches Mongoose's connection.collections behaviour:
+  //
+  //   const cols = mongoose.connection.collections;
+  //   for (const key in cols) { await cols[key].deleteMany({}); }
+
+  get collections() {
+    if (!this.db || this.readyState !== STATES.connected) return {};
+    const db    = this.db;
+    const conn  = this;
+    return new Proxy({}, {
+      get(_target, prop) {
+        if (typeof prop !== 'string') return undefined;
+        return db.collection(prop);
+      },
+      ownKeys() {
+        // Enumerate all model-registered collection names
+        return Object.values(conn._models).map(M => {
+          try { return M.collection.collectionName || M.collection.name || ''; } catch { return ''; }
+        }).filter(Boolean);
+      },
+      getOwnPropertyDescriptor(_target, prop) {
+        return { enumerable: true, configurable: true, value: db.collection(String(prop)) };
+      },
+      has(_target, prop) {
+        return typeof prop === 'string';
+      },
+    });
+  }
+
+  // ─── listCollections() — async helper for test teardown ──────────────────
+  // Async counterpart of collections. Returns actual Collection objects from
+  // the DB so tests can iterate and wipe every collection:
+  //
+  //   for (const col of await mongoose.connection.listCollections()) {
+  //     await col.deleteMany({});
+  //   }
+
+  async listCollections(filter = {}) {
+    const db   = this.getDb();
+    const list = await db.listCollections(filter).toArray();
+    return list.map(info => db.collection(info.name));
+  }
+
   // ─── dropDatabase() ───────────────────────────────────────────────────
 
   async dropDatabase() {
