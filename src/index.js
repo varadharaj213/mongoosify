@@ -130,7 +130,7 @@ const mongoosify = {
   },
 
   /** Shorthand: mongoosify.ObjectId */
-  get ObjectId() { return require('mongodb').ObjectId; },
+  ObjectId: require('mongodb').ObjectId,
 
   // ─── Global settings ────────────────────────────────────────────────────
 
@@ -256,6 +256,6 @@ module.exports.Document    = Document;
 module.exports.Query       = Query;
 module.exports.ObjectId    = require('mongodb').ObjectId;
 module.exports.model       = mongoosify.model;
-module.exports.connect     = (uri, opts) => mongoosify.connect(uri, opts);
-module.exports.disconnect  = () => mongoosify.disconnect();
+module.exports.connect     = (uri, opts) => connection.connect(uri, opts).then(() => mongoosify);
+module.exports.disconnect  = () => connection.disconnect();
 module.exports.default     = mongoosify;   // for ESM interop: import mongoose from '...'
