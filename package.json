@@ -1,10 +1,16 @@
 {
   "name": "varadharajcredopay",
-  "version": "1.0.3",
-  "description": "A Mongoose-like ODM for MongoDB — built from scratch",
+  "version": "1.1.0",
+  "description": "A Mongoose-like ODM for MongoDB — built from scratch. Supports JS and TypeScript.",
   "main": "src/index.js",
+  "types": "src/index.d.ts",
   "exports": {
-    ".": "./src/index.js"
+    ".": {
+      "types": "./src/index.d.ts",
+      "require": "./src/index.js",
+      "import": "./src/index.js",
+      "default": "./src/index.js"
+    }
   },
   "files": [
     "src/",
@@ -13,7 +19,8 @@
   ],
   "scripts": {
     "test": "jest --forceExit",
-    "test:watch": "jest --watch"
+    "test:watch": "jest --watch",
+    "type-check": "tsc --noEmit"
   },
   "keywords": [
     "mongodb",
@@ -21,7 +28,8 @@
     "mongoose",
     "database",
     "schema",
-    "model"
+    "model",
+    "typescript"
   ],
   "author": "varadharaj",
   "license": "MIT",
@@ -32,6 +40,9 @@
     "mongodb": "^6.0.0"
   },
   "devDependencies": {
-    "jest": "^29.0.0"
+    "@types/node": "^20.0.0",
+    "jest": "^29.0.0",
+    "ts-jest": "^29.0.0",
+    "typescript": "^5.0.0"
   }
 }
