@@ -545,7 +545,6 @@ export interface Mongoosify {
 
 declare const mongoosify: Mongoosify;
 export default mongoosify;
-export = mongoosify;
 
 // ─── Named exports ────────────────────────────────────────────────────────────
 // Allows both import styles:
