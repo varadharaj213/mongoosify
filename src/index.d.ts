@@ -11,24 +11,35 @@ export type AnyObject = Record<string, any>;
 export type DeepPartial<T> = { [K in keyof T]?: DeepPartial<T[K]> };
 
 /** Strip methods and virtuals to get plain data keys */
-export type DocData<T> = Omit<T, keyof Document<T>>;
+export type DocData<T> = Omit<T, keyof MongoosifyDocument<T>>;
 
-/** MongoDB filter type */
+/** MongoDB filter type — fully permissive to accept dot-notation, operators, and loose types */
 export type FilterQuery<T> = {
-  [K in keyof T]?: T[K] | { [op: string]: any };
+  [K in keyof T]?: any;
 } & { [key: string]: any };
 
-/** MongoDB update type */
+/**
+ * MongoDB update type.
+ * The operator sub-documents use `AnyObject` so dot-notation paths like
+ * `"exhaustedLimit.transaction_limits.$.daily"` are accepted without error.
+ */
 export type UpdateQuery<T> = {
-  $set?: Partial<T> & AnyObject;
-  $unset?: { [K in keyof T]?: any };
-  $inc?: { [K in keyof T]?: number };
-  $push?: { [K in keyof T]?: any };
-  $pull?: { [K in keyof T]?: any };
-  $addToSet?: { [K in keyof T]?: any };
+  $set?: AnyObject;
+  $unset?: AnyObject;
+  $inc?: AnyObject;
+  $push?: AnyObject;
+  $pull?: AnyObject;
+  $addToSet?: AnyObject;
+  $min?: AnyObject;
+  $max?: AnyObject;
+  $mul?: AnyObject;
+  $rename?: AnyObject;
+  $bit?: AnyObject;
+  $currentDate?: AnyObject;
   [op: string]: any;
 };
 
+/** Projection — accepts both known keys and dot-notation strings */
 export type ProjectionType<T> = { [K in keyof T]?: 0 | 1 } & { [key: string]: any };
 
 // ─── SchemaType Classes ───────────────────────────────────────────────────────
@@ -40,27 +51,31 @@ export class SchemaType {
   validators: Array<{ validator: (v: any) => boolean; message: string; type: string }>;
   _defaultValue: any;
 
-  default(val: any): this;
-  required(required: boolean | [boolean, string], message?: string): this;
-  validate(obj: ((v: any) => boolean) | { validator: (v: any) => boolean; message?: string }, errorMsg?: string, type?: string): this;
-  enum(values: any[] | AnyObject): this;
+  default(val: any): SchemaType;
+  required(required: boolean | [boolean, string], message?: string): SchemaType;
+  validate(
+    obj: ((v: any) => boolean) | { validator: (v: any) => boolean; message?: string },
+    errorMsg?: string,
+    type?: string,
+  ): SchemaType;
+  enum(values: any[] | AnyObject): SchemaType;
   cast(val: any): any;
   doValidate(value: any, fn: (err: Error | null) => void, scope: any): void;
 }
 
 export class StringSchemaType extends SchemaType {
-  minlength(val: number | [number, string]): this;
-  maxlength(val: number | [number, string]): this;
-  match(regExp: RegExp | [RegExp, string]): this;
+  minlength(val: number | [number, string]): StringSchemaType;
+  maxlength(val: number | [number, string]): StringSchemaType;
+  match(regExp: RegExp | [RegExp, string]): StringSchemaType;
 }
 export class NumberSchemaType extends SchemaType {
-  min(val: number | [number, string]): this;
-  max(val: number | [number, string]): this;
+  min(val: number | [number, string]): NumberSchemaType;
+  max(val: number | [number, string]): NumberSchemaType;
 }
 export class BooleanSchemaType extends SchemaType {}
 export class DateSchemaType extends SchemaType {
-  min(val: Date | string): this;
-  max(val: Date | string): this;
+  min(val: Date | string): DateSchemaType;
+  max(val: Date | string): DateSchemaType;
 }
 export class ObjectIdSchemaType extends SchemaType {}
 export class ArraySchemaType extends SchemaType {}
@@ -70,7 +85,7 @@ export class MapSchemaType extends SchemaType {}
 
 // ─── SchemaTypes Registry ────────────────────────────────────────────────────
 
-export const SchemaTypes: {
+export declare const SchemaTypes: {
   String: typeof StringSchemaType;
   Number: typeof NumberSchemaType;
   Boolean: typeof BooleanSchemaType;
@@ -89,14 +104,14 @@ export const SchemaTypes: {
 
 // ─── Schema Definition Types ─────────────────────────────────────────────────
 
-export type SchemaTypeOpts<T> = {
+export type SchemaTypeOpts<T = any> = {
   type?: any;
   required?: boolean | string | [boolean, string];
   default?: T | (() => T);
   unique?: boolean;
   index?: boolean | AnyObject;
   sparse?: boolean;
-  enum?: T[];
+  enum?: any[];
   validate?: ((v: T) => boolean) | { validator: (v: T) => boolean; message?: string };
   ref?: string;
   trim?: boolean;
@@ -105,8 +120,8 @@ export type SchemaTypeOpts<T> = {
   minlength?: number | [number, string];
   maxlength?: number | [number, string];
   match?: RegExp | [RegExp, string];
-  min?: T extends number ? number | [number, string] : never;
-  max?: T extends number ? number | [number, string] : never;
+  min?: number | [number, string];
+  max?: number | [number, string];
   immutable?: boolean;
   select?: boolean;
   get?: (v: T) => any;
@@ -125,13 +140,14 @@ export type SchemaDefinitionProperty<T = any> =
   | typeof Map
   | typeof ObjectId
   | 'String' | 'Number' | 'Boolean' | 'Date' | 'Array' | 'Mixed' | 'ObjectId' | 'ObjectID'
-  | SchemaTypeOpts<T>
-  | SchemaDefinitionProperty<T>[]
-  | SchemaDefinition;
+  | SchemaTypeOpts<any>
+  | SchemaDefinitionProperty<any>[]
+  | SchemaDefinition
+  | any;
 
 export type SchemaDefinition<T = any> = {
   [K in keyof T]?: SchemaDefinitionProperty<T[K]>;
-};
+} & { [key: string]: any };
 
 // ─── Schema Options ───────────────────────────────────────────────────────────
 
@@ -161,7 +177,7 @@ export interface PopulateOptions {
 
 // ─── Schema Class ─────────────────────────────────────────────────────────────
 
-export class Schema<DocType = any, InstanceMethods = AnyObject, StaticMethods = AnyObject> {
+export declare class Schema<DocType = any, InstanceMethods = AnyObject, StaticMethods = AnyObject> {
   obj: AnyObject;
   paths: Record<string, SchemaType>;
   virtuals: Record<string, { get: (() => any) | null; set: ((v: any) => void) | null; options?: AnyObject }>;
@@ -173,71 +189,99 @@ export class Schema<DocType = any, InstanceMethods = AnyObject, StaticMethods = 
   options: Required<SchemaOptions>;
   childSchemas: Array<{ schema: Schema; model: { path: string } }>;
 
-  constructor(definition?: SchemaDefinition<DocType>, options?: SchemaOptions);
+  constructor(definition?: SchemaDefinition<DocType> | AnyObject, options?: SchemaOptions);
 
   // Path management
   path(path: string): SchemaType | null;
-  path(path: string, obj: any): this;
+  path(path: string, obj: any): Schema<DocType, InstanceMethods, StaticMethods>;
 
   // Virtuals
-  virtual(name: string, options?: { ref: string; localField: string; foreignField: string; justOne?: boolean; [key: string]: any }): {
-    get(fn: (this: Document<DocType> & DocType) => any): this;
-    set(fn: (this: Document<DocType> & DocType, v: any) => void): this;
+  virtual(
+    name: string,
+    options?: { ref: string; localField: string; foreignField: string; justOne?: boolean; [key: string]: any },
+  ): {
+    get(fn: (...args: any[]) => any): any;
+    set(fn: (...args: any[]) => void): any;
   };
 
   // Middleware / Hooks
-  pre(event: string | RegExp, fn: (this: Document<DocType> & DocType, next: (err?: Error) => void) => void | Promise<void>): this;
-  post(event: string | RegExp, fn: (this: Document<DocType> & DocType, next?: (err?: Error) => void) => void | Promise<void>): this;
+  pre(event: string | RegExp, fn: (this: any, ...args: any[]) => void | Promise<void>): Schema<DocType, InstanceMethods, StaticMethods>;
+  post(event: string | RegExp, fn: (this: any, ...args: any[]) => void | Promise<void>): Schema<DocType, InstanceMethods, StaticMethods>;
   getHooks(type: 'pre' | 'post', event: string): Function[];
 
   // Indexes
-  index(fields: AnyObject, options?: AnyObject): this;
+  index(fields: AnyObject, options?: AnyObject): Schema<DocType, InstanceMethods, StaticMethods>;
   indexes(): Array<[AnyObject, AnyObject]>;
 
   // Plugins
-  plugin(fn: (schema: Schema, opts?: any) => void, opts?: any): this;
+  plugin(fn: (schema: Schema, opts?: any) => void, opts?: any): Schema<DocType, InstanceMethods, StaticMethods>;
 
   // Collection
   collectionName(modelName: string): string;
 
   // Validation
   validate(data: AnyObject, isUpdate?: boolean): Promise<AnyObject>;
+}
 
-  static Types: typeof SchemaTypes;
-  static ObjectId: typeof ObjectIdSchemaType;
+// Schema namespace — merged with the class declaration above.
+// Provides Schema.Types.ObjectId usable both as a value and as a type.
+export declare namespace Schema {
+  namespace Types {
+    type ObjectId = import('mongodb').ObjectId;
+    const ObjectId: typeof ObjectIdSchemaType;
+    const ObjectID: typeof ObjectIdSchemaType;
+    const String: typeof StringSchemaType;
+    const Number: typeof NumberSchemaType;
+    const Boolean: typeof BooleanSchemaType;
+    const Bool: typeof BooleanSchemaType;
+    const Date: typeof DateSchemaType;
+    const Oid: typeof ObjectIdSchemaType;
+    const Array: typeof ArraySchemaType;
+    const Mixed: typeof MixedSchemaType;
+    const Buffer: typeof BufferSchemaType;
+    const Map: typeof MapSchemaType;
+    function resolve(type: any): typeof SchemaType;
+  }
+  type ObjectId = import('mongodb').ObjectId;
 }
 
 // ─── Document Class ───────────────────────────────────────────────────────────
+// Renamed to MongoosifyDocument internally to avoid clashing with the global
+// `Document` interface that TypeScript/DOM provides.
 
-export class Document<DocType = any> {
+export declare class MongoosifyDocument<DocType = any> {
   _id: ObjectId;
   errors: Record<string, any>;
 
   constructor(data?: Partial<DocType>, schema?: Schema, model?: any);
 
   get(path: string): any;
-  set(path: string, value: any): this;
+  set(path: string, value: any): MongoosifyDocument<DocType>;
 
   isModified(path?: string): boolean;
-  markModified(path: string): this;
+  markModified(path: string): MongoosifyDocument<DocType>;
   isNew(): boolean;
 
-  validate(): Promise<this>;
-  save(): Promise<this>;
-  remove(): Promise<this>;
-  deleteOne(): Promise<this>;
+  validate(): Promise<MongoosifyDocument<DocType> & DocType>;
+  save(): Promise<MongoosifyDocument<DocType> & DocType>;
+  remove(): Promise<MongoosifyDocument<DocType> & DocType>;
+  deleteOne(): Promise<MongoosifyDocument<DocType> & DocType>;
 
-  populate(path: string | PopulateOptions): Promise<this>;
+  populate(path: string | PopulateOptions): Promise<MongoosifyDocument<DocType> & DocType>;
 
-  toObject(options?: { virtuals?: boolean; [key: string]: any }): AnyObject;
-  toJSON(options?: AnyObject): AnyObject;
+  toObject(options?: { virtuals?: boolean; [key: string]: any }): any;
+  toJSON(options?: AnyObject): any;
   toString(): string;
   inspect(): AnyObject;
 }
 
+// Keep the export name as `Document` for backward-compat with consumer code
+// that does `import { Document } from 'varadharajcredopay'`.
+export { MongoosifyDocument as Document };
+
 // ─── Query Class ─────────────────────────────────────────────────────────────
 
-export class Query<ResultType = any, DocType = any> implements Promise<ResultType> {
+export declare class Query<ResultType = any, DocType = any> implements Promise<ResultType> {
   readonly [Symbol.toStringTag]: string;
 
   readonly model: ModelType<DocType>;
@@ -255,27 +299,29 @@ export class Query<ResultType = any, DocType = any> implements Promise<ResultTyp
   getFilter(): FilterQuery<DocType>;
 
   // Chainable modifiers
-  select(fields: string | ProjectionType<DocType>): this;
-  sort(arg: string | AnyObject): this;
-  limit(n: number): this;
-  skip(n: number): this;
-  lean(val?: boolean): Query<AnyObject[], DocType>;
-  hint(h: AnyObject): this;
-  maxTimeMS(ms: number): this;
-  comment(c: string): this;
-  collation(c: AnyObject): this;
-  where(path: string | AnyObject, val?: any): this;
-  populate(path: string | PopulateOptions, select?: string | AnyObject): this;
-  distinct(field: string): this;
+  select(fields: string | ProjectionType<DocType>): Query<ResultType, DocType>;
+  sort(arg: string | AnyObject): Query<ResultType, DocType>;
+  limit(n: number): Query<ResultType, DocType>;
+  skip(n: number): Query<ResultType, DocType>;
+  lean(val?: boolean): Query<any, DocType>;
+  hint(h: AnyObject): Query<ResultType, DocType>;
+  maxTimeMS(ms: number): Query<ResultType, DocType>;
+  comment(c: string): Query<ResultType, DocType>;
+  collation(c: AnyObject): Query<ResultType, DocType>;
+  where(path: string | AnyObject, val?: any): Query<ResultType, DocType>;
+  populate(path: string | PopulateOptions | Array<string | PopulateOptions>, select?: string | AnyObject): Query<ResultType, DocType>;
+  distinct(field: string): Query<ResultType, DocType>;
   countDocuments(): Query<number, DocType>;
 
   // Execution
   exec(): Promise<ResultType>;
   then<TResult1 = ResultType, TResult2 = never>(
     onfulfilled?: ((value: ResultType) => TResult1 | PromiseLike<TResult1>) | null,
-    onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | null
+    onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | null,
   ): Promise<TResult1 | TResult2>;
-  catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | null): Promise<ResultType | TResult>;
+  catch<TResult = never>(
+    onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | null,
+  ): Promise<ResultType | TResult>;
   finally(onfinally?: (() => void) | null): Promise<ResultType>;
 
   cursor(): any;
@@ -283,34 +329,36 @@ export class Query<ResultType = any, DocType = any> implements Promise<ResultTyp
 
 // ─── Aggregate Class ──────────────────────────────────────────────────────────
 
-export class Aggregate<ResultType = any[]> implements Promise<ResultType> {
+export declare class Aggregate<ResultType = any[]> implements Promise<ResultType> {
   readonly [Symbol.toStringTag]: string;
 
   constructor(model: any, pipeline?: AnyObject[], options?: AnyObject);
 
-  append(...stages: AnyObject[]): this;
-  match(obj: AnyObject): this;
-  group(obj: AnyObject): this;
-  sort(obj: AnyObject): this;
-  project(obj: AnyObject): this;
-  limit(n: number): this;
-  skip(n: number): this;
-  unwind(path: string | AnyObject): this;
-  lookup(obj: AnyObject): this;
-  addFields(obj: AnyObject): this;
-  count(field?: string): this;
-  facet(obj: AnyObject): this;
-  sample(size: number): this;
-  replaceRoot(obj: AnyObject): this;
-  option(key: string | AnyObject, val?: any): this;
+  append(...stages: AnyObject[]): Aggregate<ResultType>;
+  match(obj: AnyObject): Aggregate<ResultType>;
+  group(obj: AnyObject): Aggregate<ResultType>;
+  sort(obj: AnyObject): Aggregate<ResultType>;
+  project(obj: AnyObject): Aggregate<ResultType>;
+  limit(n: number): Aggregate<ResultType>;
+  skip(n: number): Aggregate<ResultType>;
+  unwind(path: string | AnyObject): Aggregate<ResultType>;
+  lookup(obj: AnyObject): Aggregate<ResultType>;
+  addFields(obj: AnyObject): Aggregate<ResultType>;
+  count(field?: string): Aggregate<ResultType>;
+  facet(obj: AnyObject): Aggregate<ResultType>;
+  sample(size: number): Aggregate<ResultType>;
+  replaceRoot(obj: AnyObject): Aggregate<ResultType>;
+  option(key: string | AnyObject, val?: any): Aggregate<ResultType>;
   pipeline(): AnyObject[];
 
   exec(): Promise<ResultType>;
   then<TResult1 = ResultType, TResult2 = never>(
     onfulfilled?: ((value: ResultType) => TResult1 | PromiseLike<TResult1>) | null,
-    onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | null
+    onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | null,
   ): Promise<TResult1 | TResult2>;
-  catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | null): Promise<ResultType | TResult>;
+  catch<TResult = never>(
+    onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | null,
+  ): Promise<ResultType | TResult>;
   finally(onfinally?: (() => void) | null): Promise<ResultType>;
 }
 
@@ -357,36 +405,70 @@ export interface PaginateResult<DocType> {
   [key: string]: any;
 }
 
-// ─── Model Type ───────────────────────────────────────────────────────────────
+// ─── Model Type ─────────��─────────────────────────────────────────────────────
 
 export type ModelType<DocType, InstanceMethods = AnyObject, QueryHelpers = AnyObject> = {
-  new(data?: Partial<DocType>): Document<DocType> & DocType & InstanceMethods;
+  new(data?: Partial<DocType>): MongoosifyDocument<DocType> & DocType & InstanceMethods;
 
   modelName: string;
   schema: Schema<DocType>;
   base: Connection;
-  collection: Collection;
-  db: Db;
+  collection: Collection & { name: string; [key: string]: any };
+  db: Db & { name: string; [key: string]: any };
 
   _waitForConnection(): Promise<void>;
   ensureIndexes(): Promise<void>;
 
-  // CRUD
-  create(docs: Partial<DocType>): Promise<Document<DocType> & DocType>;
-  create(docs: Partial<DocType>[]): Promise<Array<Document<DocType> & DocType>>;
-  insertMany(docs: Partial<DocType>[], options?: AnyObject): Promise<Array<Document<DocType> & DocType>>;
+  // CRUD — loosened to accept any object shape for create/insertMany
+  create(docs: any): Promise<MongoosifyDocument<DocType> & DocType>;
+  create(docs: any[]): Promise<Array<MongoosifyDocument<DocType> & DocType>>;
+  insertMany(docs: any | any[], options?: AnyObject): Promise<Array<MongoosifyDocument<DocType> & DocType>>;
 
-  find(filter?: FilterQuery<DocType>, projection?: ProjectionType<DocType> | string | null, options?: AnyObject): Query<Array<Document<DocType> & DocType>, DocType> & QueryHelpers;
-  findOne(filter?: FilterQuery<DocType>, projection?: ProjectionType<DocType> | string | null): Query<(Document<DocType> & DocType) | null, DocType> & QueryHelpers;
-  findById(id: any, projection?: ProjectionType<DocType> | string | null): Query<(Document<DocType> & DocType) | null, DocType>;
+  find(
+    filter?: FilterQuery<DocType>,
+    projection?: ProjectionType<DocType> | string | null,
+    options?: AnyObject,
+  ): Query<Array<MongoosifyDocument<DocType> & DocType>, DocType> & QueryHelpers;
+  findOne(
+    filter?: FilterQuery<DocType>,
+    projection?: ProjectionType<DocType> | string | null,
+  ): Query<(MongoosifyDocument<DocType> & DocType) | null, DocType> & QueryHelpers;
+  findById(
+    id: any,
+    projection?: ProjectionType<DocType> | string | null,
+  ): Query<(MongoosifyDocument<DocType> & DocType) | null, DocType>;
 
-  findByIdAndUpdate(id: any, update: UpdateQuery<DocType>, options?: AnyObject): Promise<(Document<DocType> & DocType) | null>;
-  findOneAndUpdate(filter: FilterQuery<DocType>, update: UpdateQuery<DocType>, options?: AnyObject): Promise<(Document<DocType> & DocType) | null>;
-  findOneAndReplace(filter: FilterQuery<DocType>, replacement: Partial<DocType>, options?: AnyObject): Promise<(Document<DocType> & DocType) | null>;
-  findByIdAndDelete(id: any, options?: AnyObject): Promise<(Document<DocType> & DocType) | null>;
-  findByIdAndRemove(id: any, options?: AnyObject): Promise<(Document<DocType> & DocType) | null>;
-  findOneAndDelete(filter: FilterQuery<DocType>, options?: AnyObject): Promise<(Document<DocType> & DocType) | null>;
-  findOneAndRemove(filter: FilterQuery<DocType>, options?: AnyObject): Promise<(Document<DocType> & DocType) | null>;
+  findByIdAndUpdate(
+    id: any,
+    update: UpdateQuery<DocType>,
+    options?: AnyObject,
+  ): Query<(MongoosifyDocument<DocType> & DocType) | null, DocType>;
+  findOneAndUpdate(
+    filter: FilterQuery<DocType>,
+    update: UpdateQuery<DocType>,
+    options?: AnyObject,
+  ): Query<(MongoosifyDocument<DocType> & DocType) | null, DocType>;
+  findOneAndReplace(
+    filter: FilterQuery<DocType>,
+    replacement: Partial<DocType>,
+    options?: AnyObject,
+  ): Promise<(MongoosifyDocument<DocType> & DocType) | null>;
+  findByIdAndDelete(
+    id: any,
+    options?: AnyObject,
+  ): Promise<(MongoosifyDocument<DocType> & DocType) | null>;
+  findByIdAndRemove(
+    id: any,
+    options?: AnyObject,
+  ): Promise<(MongoosifyDocument<DocType> & DocType) | null>;
+  findOneAndDelete(
+    filter: FilterQuery<DocType>,
+    options?: AnyObject,
+  ): Promise<(MongoosifyDocument<DocType> & DocType) | null>;
+  findOneAndRemove(
+    filter: FilterQuery<DocType>,
+    options?: AnyObject,
+  ): Promise<(MongoosifyDocument<DocType> & DocType) | null>;
 
   updateOne(filter: FilterQuery<DocType>, update: UpdateQuery<DocType>, options?: AnyObject): Query<any, DocType>;
   updateMany(filter: FilterQuery<DocType>, update: UpdateQuery<DocType>, options?: AnyObject): Query<any, DocType>;
@@ -409,7 +491,10 @@ export type ModelType<DocType, InstanceMethods = AnyObject, QueryHelpers = AnyOb
   populate(docs: any | any[], options: string | PopulateOptions): Promise<any>;
 
   // Pagination
-  paginate(filter?: FilterQuery<DocType>, options?: PaginateOptions): Promise<PaginateResult<Document<DocType> & DocType>>;
+  paginate(
+    filter?: FilterQuery<DocType>,
+    options?: PaginateOptions,
+  ): Promise<PaginateResult<MongoosifyDocument<DocType> & DocType>>;
   aggregatePaginate(aggregate: Aggregate | AnyObject[], options?: AnyObject): Promise<any>;
 
   _populateDoc(doc: any, opts: PopulateOptions | string): Promise<void>;
@@ -426,7 +511,7 @@ export interface ConnectionStates {
 
 // ─── Connection Class ─────────────────────────────────────────────────────────
 
-export class Connection extends EventEmitter {
+export declare class Connection extends EventEmitter {
   client: MongoClient | null;
   db: Db | null;
   readyState: 0 | 1 | 2 | 3;
@@ -436,41 +521,21 @@ export class Connection extends EventEmitter {
   readonly host: string;
   readonly port: number;
 
-  connect(uri: string, options?: AnyObject): Promise<this>;
-  disconnect(): Promise<this>;
-  close(force?: boolean): Promise<this>;
+  connect(uri: string, options?: AnyObject): Promise<Connection>;
+  disconnect(): Promise<Connection>;
+  close(force?: boolean): Promise<Connection>;
 
   getDb(): Db;
   collection(name: string): Collection;
 
-  /**
-   * Map of collection-name → Collection for all model-registered collections.
-   * Mirrors Mongoose's `connection.collections` — safe to use in `for..in` loops.
-   *
-   * ```ts
-   * const cols = mongoose.connection.collections;
-   * for (const key in cols) { await cols[key].deleteMany({}); }
-   * ```
-   */
   readonly collections: Record<string, Collection>;
-
-  /**
-   * Async version — returns Collection objects for *every* collection that
-   * actually exists in the database. Useful for test teardown:
-   *
-   * ```ts
-   * for (const col of await mongoose.connection.listCollections()) {
-   *   await col.deleteMany({});
-   * }
-   * ```
-   */
   listCollections(filter?: AnyObject): Promise<Collection[]>;
 
   model<DocType = any>(name: string): ModelType<DocType>;
   model<DocType = any>(name: string, schema: Schema<DocType>, collectionName?: string): ModelType<DocType>;
 
   createConnection(uri?: string, options?: AnyObject): Connection;
-  useDb(dbName: string): this;
+  useDb(dbName: string): Connection;
   dropDatabase(): Promise<any>;
   startSession(options?: AnyObject): Promise<ClientSession>;
   withTransaction<T = any>(fn: (session: ClientSession) => Promise<T>, options?: AnyObject): Promise<T>;
@@ -479,32 +544,28 @@ export class Connection extends EventEmitter {
 // ─── Mongoosify (default export) ──────────────────────────────────────────────
 
 export interface Mongoosify {
-  // Connection
   connect(uri: string, options?: AnyObject): Promise<Mongoosify>;
   disconnect(): Promise<Connection>;
   createConnection(uri?: string, options?: AnyObject): Connection;
   readonly connection: Connection;
   readonly connections: Connection[];
 
-  // Model registry
   model<DocType = any, InstanceMethods = AnyObject, QueryHelpers = AnyObject>(
-    name: string
+    name: string,
   ): ModelType<DocType, InstanceMethods, QueryHelpers>;
   model<DocType = any, InstanceMethods = AnyObject, QueryHelpers = AnyObject>(
     name: string,
     schema: Schema<DocType, InstanceMethods>,
-    collectionName?: string
+    collectionName?: string,
   ): ModelType<DocType, InstanceMethods, QueryHelpers>;
 
   modelNames(): string[];
 
-  // Classes
   Schema: typeof Schema;
   SchemaTypes: typeof SchemaTypes;
-  Document: typeof Document;
+  Document: typeof MongoosifyDocument;
   Query: typeof Query;
 
-  // Types
   readonly Types: {
     ObjectId: typeof ObjectId;
     String: typeof StringSchemaType;
@@ -518,27 +579,22 @@ export interface Mongoosify {
   };
   readonly ObjectId: typeof ObjectId;
 
-  // Settings
-  set(key: string, value: any): this;
+  set(key: "debug", value: boolean | ((collectionName: any, method: any, query: any, ...args: any[]) => void)): Mongoosify;
+  set(key: string, value: any): Mongoosify;
   get(key: string): any;
 
-  // readyState
   readonly readyState: 0 | 1 | 2 | 3;
   STATES: ConnectionStates;
 
-  // Events
-  on(event: string, fn: (...args: any[]) => void): this;
-  once(event: string, fn: (...args: any[]) => void): this;
-  off(event: string, fn: (...args: any[]) => void): this;
+  on(event: string, fn: (...args: any[]) => void): Mongoosify;
+  once(event: string, fn: (...args: any[]) => void): Mongoosify;
+  off(event: string, fn: (...args: any[]) => void): Mongoosify;
 
-  // Transactions
   startSession(options?: AnyObject): Promise<ClientSession>;
   withTransaction<T = any>(fn: (session: ClientSession) => Promise<T>, options?: AnyObject): Promise<T>;
 
-  // Plugins
-  plugin(fn: (schema: Schema, opts?: any) => void, opts?: any): this;
+  plugin(fn: (schema: Schema, opts?: any) => void, opts?: any): Mongoosify;
 
-  // Helpers
   isValidObjectId(id: any): boolean;
   isObjectIdOrHexString(id: any): boolean;
 }
@@ -547,17 +603,10 @@ declare const mongoosify: Mongoosify;
 export default mongoosify;
 
 // ─── Named exports ────────────────────────────────────────────────────────────
-// Allows both import styles:
-//   import mongoose from 'varadharajcredopay'
-//   import { Schema, model, ObjectId, SchemaTypes, Document, Query } from 'varadharajcredopay'
+// Use `export declare function` / `export declare const` exclusively here —
+// never re-export a name that was already declared above with `export class`
+// or `export const`, which is what caused the TS2323 errors.
 
-export { Schema };
-export { SchemaTypes };
-export { Document };
-export { Query };
-export { ObjectId };
-
-/** Named model() — same as mongoose.model() */
 export declare function model<
   DocType = any,
   InstanceMethods = AnyObject,
@@ -565,11 +614,12 @@ export declare function model<
 >(
   name: string,
   schema?: Schema<DocType, InstanceMethods>,
-  collectionName?: string
+  collectionName?: string,
 ): ModelType<DocType, InstanceMethods, QueryHelpers>;
 
-/** Named connect() */
 export declare function connect(uri: string, options?: AnyObject): Promise<Mongoosify>;
-
-/** Named disconnect() */
 export declare function disconnect(): Promise<Connection>;
+
+// Re-export ObjectId from mongodb so consumers can do:
+//   import { ObjectId } from 'varadharajcredopay'
+export { ObjectId } from 'mongodb';
