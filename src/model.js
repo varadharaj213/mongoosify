@@ -124,7 +124,7 @@ function createModel(modelName, schema, conn, explicitCollectionName) {
     },
   });
 
-  // ─── Connection buffering ────────────────────────────────────���──────────
+  // ─── Connection buffering ───────────────────────────────────────────────
   // Like Mongoose: queue operations until connected.
 
   Model._waitForConnection = function () {
@@ -187,7 +187,7 @@ function createModel(modelName, schema, conn, explicitCollectionName) {
     return q;
   };
 
-  // ─���─ findOne() ──────────────────────────────────────────────────────────
+  // ─── findOne() ─────────────────────────────────────────────────────���──��─
 
   Model.findOne = function (filter = {}, projection = null) {
     const q = new Query(Model, 'findOne', _normalizeFilter(filter));
@@ -216,8 +216,10 @@ function createModel(modelName, schema, conn, explicitCollectionName) {
             returnNewDocument = false } = options;
     const shouldReturnNew = returnNew || returnNewDocument;
 
+    // Wrap plain objects in $set if needed (Mongoose compatibility)
+    let upd = _wrapInSetIfNeeded(update);
+
     // Add timestamps updatedAt
-    let upd = update;
     if (schema._timestamps) {
       const key = schema._timestamps.updatedAt;
       if (upd.$set) upd.$set[key] = new Date();
@@ -271,7 +273,7 @@ function createModel(modelName, schema, conn, explicitCollectionName) {
     return new Query(Model, 'updateOne', _normalizeFilter(filter)).setUpdate(upd, options);
   };
 
-  // ─── updateMany() ───────────────────────────────────────────────────────
+  // ─── updateMany() ───────────────────────────���──��────────────────────────
 
   Model.updateMany = function (filter, update, options = {}) {
     const upd = _addTimestamps(update, schema);
@@ -291,7 +293,7 @@ function createModel(modelName, schema, conn, explicitCollectionName) {
     return new Query(Model, 'deleteOne', _normalizeFilter(filter));
   };
 
-  // ─── deleteMany() ───────────────────────────────────────────────────────
+  // ─── deleteMany() ──────────────────────────────────────────────────────���
 
   Model.deleteMany = function (filter = {}) {
     return new Query(Model, 'deleteMany', _normalizeFilter(filter));
@@ -417,17 +419,12 @@ function createModel(modelName, schema, conn, explicitCollectionName) {
     const virtualPopResult = _findVirtualPopulate(schema, popPath);
     if (virtualPopResult) {
       const { ref, localField, foreignField, justOne } = virtualPopResult;
-      // Compute the full localField path by using the populate path's prefix
-      // e.g. popPath = "finalDetails.salesInformation.payFacFinal"
-      //      localField from virtual = "aggregator"
-      //      fullLocalField = "finalDetails.salesInformation.aggregator"
       const pathParts = popPath.split('.');
       const prefix = pathParts.slice(0, pathParts.length - 1).join('.');
       const fullLocalField = prefix ? `${prefix}.${localField}` : localField;
 
       const refModel = _resolveModel(ref);
       if (refModel) {
-        // Collect all local field values from docs using the full path
         const localValues = arr.map(d => _getNestedValue(d, fullLocalField)).filter(v => v != null);
         if (localValues.length) {
           let refDocs;
@@ -437,7 +434,6 @@ function createModel(modelName, schema, conn, explicitCollectionName) {
           } else {
             refDocs = await refModel.collection.find({ [foreignField]: { $in: localValues } }).toArray();
           }
-          // Build map: foreignField value → doc(s)
           const map = {};
           for (const ref of refDocs) {
             const key = ref[foreignField] ? ref[foreignField].toString() : '';
@@ -454,7 +450,6 @@ function createModel(modelName, schema, conn, explicitCollectionName) {
               const key = localVal.toString();
               const resolved = map[key] || (justOne ? null : []);
               _setNestedValue(doc, popPath, resolved);
-              // Handle nested populate
               if (nestedPopulate && resolved && typeof resolved === 'object') {
                 const resolvedArr = Array.isArray(resolved) ? resolved : [resolved];
                 const nestedPops = Array.isArray(nestedPopulate) ? nestedPopulate : [nestedPopulate];
@@ -487,26 +482,16 @@ function createModel(modelName, schema, conn, explicitCollectionName) {
 
   // ─── Virtual populate helpers ───────────────────────────────────────────
 
-  /**
-   * Recursively search schema and nested sub-schemas for a virtual populate
-   * definition matching the given dot-notation path.
-   * e.g. path = "finalDetails.salesInformation.payFacFinal"
-   */
   function _findVirtualPopulate(schemaObj, path) {
     if (!schemaObj || !path) return null;
 
-    // Direct match on this schema's virtuals
     if (schemaObj.virtuals[path] && schemaObj.virtuals[path].options && schemaObj.virtuals[path].options.ref) {
       return schemaObj.virtuals[path].options;
     }
 
-    // Extract the leaf name (last segment of dot-notation path)
-    // e.g. "finalDetails.salesInformation.payFacFinal" → "payFacFinal"
     const parts = path.split('.');
     const leafName = parts[parts.length - 1];
 
-    // 1. Recursively collect ALL Schema instances from the entire schema tree
-    //    and check each one's virtuals for the leaf name
     const allSubSchemas = [];
     _collectAllSubSchemas(schemaObj, allSubSchemas);
     for (const subSchema of allSubSchemas) {
@@ -515,16 +500,13 @@ function createModel(modelName, schema, conn, explicitCollectionName) {
       }
     }
 
-    // 2. Also scan ALL registered models' schemas (covers cross-model virtuals)
     const allModels = { ...modelConnection._models, ...connection._models };
     for (const mName of Object.keys(allModels)) {
       const m = allModels[mName];
       if (!m.schema) continue;
-      // Check the model schema itself
       if (m.schema.virtuals[leafName] && m.schema.virtuals[leafName].options && m.schema.virtuals[leafName].options.ref) {
         return m.schema.virtuals[leafName].options;
       }
-      // Check all sub-schemas of this model
       const modelSubSchemas = [];
       _collectAllSubSchemas(m.schema, modelSubSchemas);
       for (const subSchema of modelSubSchemas) {
@@ -537,14 +519,10 @@ function createModel(modelName, schema, conn, explicitCollectionName) {
     return null;
   }
 
-  /**
-   * Recursively collect all Schema instances from a schema's childSchemas tree.
-   * This walks the entire nested schema hierarchy.
-   */
   function _collectAllSubSchemas(schemaObj, result, visited) {
     if (!schemaObj) return;
     if (!visited) visited = new Set();
-    if (visited.has(schemaObj)) return; // prevent infinite loops
+    if (visited.has(schemaObj)) return;
     visited.add(schemaObj);
 
     if (schemaObj.childSchemas) {
@@ -557,9 +535,6 @@ function createModel(modelName, schema, conn, explicitCollectionName) {
     }
   }
 
-  /**
-   * Resolve a model by name or by Model class reference.
-   */
   function _resolveModel(nameOrModel) {
     if (!nameOrModel) return null;
     if (typeof nameOrModel === 'function' && nameOrModel.modelName) return nameOrModel;
@@ -569,9 +544,6 @@ function createModel(modelName, schema, conn, explicitCollectionName) {
     return null;
   }
 
-  /**
-   * Populate a single plain doc (not a Document instance) with a ref field.
-   */
   async function _populateSingleDoc(doc, opts, refModel) {
     const val = _getNestedValue(doc, opts.path);
     if (!val) return;
@@ -586,7 +558,6 @@ function createModel(modelName, schema, conn, explicitCollectionName) {
     }
     if (refDoc) {
       _setNestedValue(doc, opts.path, refDoc);
-      // Recurse for nested populate
       if (opts.populate) {
         const nestedPops = Array.isArray(opts.populate) ? opts.populate : [opts.populate];
         for (const np of nestedPops) {
@@ -603,8 +574,6 @@ function createModel(modelName, schema, conn, explicitCollectionName) {
   }
 
   // ─── paginate() — Built-in mongoose-paginate-v2 compatible ──────────────
-  // This is a built-in implementation so the external plugin is optional.
-  // API: Model.paginate(query, options) → { docs, totalDocs, limit, page, totalPages, ... }
 
   Model.paginate = async function (query = {}, options = {}) {
     await Model._waitForConnection();
@@ -630,7 +599,6 @@ function createModel(modelName, schema, conn, explicitCollectionName) {
       read,
     } = options;
 
-    // Labels
     const labelDocs       = customLabels.docs       || 'docs';
     const labelTotalDocs  = customLabels.totalDocs  || 'totalDocs';
     const labelLimit      = customLabels.limit      || 'limit';
@@ -646,7 +614,6 @@ function createModel(modelName, schema, conn, explicitCollectionName) {
     const normalizedFilter = _normalizeFilter(query);
     const skip = offset !== undefined ? offset : (page - 1) * limit;
 
-    // Count
     let countPromise;
     if (useEstimatedCount) {
       countPromise = Model.collection.estimatedDocumentCount();
@@ -658,7 +625,6 @@ function createModel(modelName, schema, conn, explicitCollectionName) {
       countPromise = Model.collection.countDocuments(normalizedFilter, countOpts);
     }
 
-    // Build find cursor
     let cursor = Model.collection.find(normalizedFilter);
     const proj = projection || (select ? _parseSelect(select) : null);
     if (proj) cursor = cursor.project(proj);
@@ -684,7 +650,6 @@ function createModel(modelName, schema, conn, explicitCollectionName) {
       docs = rawDocs.map(d => new Document(d, schema, Model));
     }
 
-    // Populate
     if (populateOpt) {
       const pops = Array.isArray(populateOpt) ? populateOpt : [populateOpt];
       for (const pop of pops) {
@@ -731,7 +696,6 @@ function createModel(modelName, schema, conn, explicitCollectionName) {
       countQuery,
     } = options;
 
-    // Labels
     const labelDocs       = customLabels.docs       || 'docs';
     const labelTotalDocs  = customLabels.totalDocs  || 'totalDocs';
     const labelLimit      = customLabels.limit      || 'limit';
@@ -743,7 +707,6 @@ function createModel(modelName, schema, conn, explicitCollectionName) {
     const labelPrevPage        = customLabels.prevPage        || 'prevPage';
     const labelPagingCounter   = customLabels.pagingCounter   || 'pagingCounter';
 
-    // Get the pipeline from the Aggregate object or array
     let pipeline;
     if (aggregate && typeof aggregate.pipeline === 'function') {
       pipeline = [...aggregate.pipeline()];
@@ -755,10 +718,8 @@ function createModel(modelName, schema, conn, explicitCollectionName) {
 
     const skip = (page - 1) * limit;
 
-    // Count pipeline: same pipeline but ending with $count
     const countPipeline = [...pipeline, { $count: 'totalCount' }];
 
-    // Data pipeline: add sort, skip, limit
     const dataPipeline = [...pipeline];
     if (sortOpt) dataPipeline.push({ $sort: typeof sortOpt === 'string' ? _parseSortString(sortOpt) : sortOpt });
     dataPipeline.push({ $skip: skip });
@@ -807,7 +768,7 @@ function createModel(modelName, schema, conn, explicitCollectionName) {
     Model[name] = fn.bind(Model);
   }
 
-  // ─── query helpers ──────────────────────────────────────────��────────────
+  // ─── query helpers ──────────────────────────────────────────────────────
 
   for (const [name, fn] of Object.entries(schema.query)) {
     Query.prototype[name] = fn;
@@ -834,7 +795,31 @@ function _normalizeFilter(filter) {
   return filter;
 }
 
+/**
+ * Check if an update object contains any MongoDB atomic/update operators.
+ * Mongoose auto-wraps plain objects in $set if no operators are found.
+ */
+function _hasAtomicOperators(update) {
+  if (!update || typeof update !== 'object') return false;
+  const keys = Object.keys(update);
+  return keys.some(function(key) { return key.charAt(0) === '$'; });
+}
+
+/**
+ * Wrap a plain update object in $set if it doesn't contain any atomic operators.
+ * This matches Mongoose's behavior where Model.updateOne(filter, { status: "success" })
+ * is automatically treated as Model.updateOne(filter, { $set: { status: "success" } }).
+ */
+function _wrapInSetIfNeeded(update) {
+  if (!update || typeof update !== 'object') return update;
+  if (_hasAtomicOperators(update)) return update;
+  // Plain object without operators — wrap in $set (Mongoose-compatible behavior)
+  return { $set: update };
+}
+
 function _addTimestamps(update, schema) {
+  // First, wrap plain objects in $set if needed (Mongoose compatibility)
+  update = _wrapInSetIfNeeded(update);
   if (!schema._timestamps) return update;
   const key = schema._timestamps.updatedAt;
   if (!key) return update;
