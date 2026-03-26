@@ -1,19 +1,27 @@
 {
   "name": "varadharajcredopay",
-  "version": "1.2.12",
+  "version": "1.2.14",
   "description": "A Mongoose-like ODM for MongoDB — built from scratch. Supports JS and TypeScript.",
   "main": "src/index.js",
-  "types": "src/index.d.ts",
+  "types": "ts-src/index.d.ts",
   "exports": {
     ".": {
-      "types": "./src/index.d.ts",
+      "types": "./ts-src/index.d.ts",
       "require": "./src/index.js",
       "import": "./src/index.js",
       "default": "./src/index.js"
+    },
+    "./ts": {
+      "types": "./ts-src/index.d.ts",
+      "require": "./ts-src/index.js",
+      "import": "./ts-src/index.js",
+      "default": "./ts-src/index.js"
     }
   },
   "files": [
     "src/",
+    "ts/",
+    "ts-src/",
     "README.md",
     "LICENSE"
   ],
