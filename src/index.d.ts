@@ -39,8 +39,8 @@ export type UpdateQuery<T> = {
   [op: string]: any;
 };
 
-/** Projection — accepts both known keys and dot-notation strings */
-export type ProjectionType<T> = { [K in keyof T]?: 0 | 1 } & { [key: string]: any };
+/** Projection — accepts both known keys, dot-notation strings, and MongoDB projection operators like $elemMatch */
+export type ProjectionType<T> = { [K in keyof T]?: 0 | 1 | AnyObject } & { [key: string]: any };
 
 // ─── SchemaType Classes ───────────────────────────────────────────────────────
 
@@ -251,6 +251,7 @@ export declare namespace Schema {
 
 export declare class MongoosifyDocument<DocType = any> {
   _id: ObjectId;
+  id?: any;
   errors: Record<string, any>;
 
   constructor(data?: Partial<DocType>, schema?: Schema, model?: any);
@@ -623,3 +624,20 @@ export declare function disconnect(): Promise<Connection>;
 // Re-export ObjectId from mongodb so consumers can do:
 //   import { ObjectId } from 'varadharajcredopay'
 export { ObjectId } from 'mongodb';
+
+// ─── Types namespace (mongoose-compat) ────────────────────────────────────────
+// Allows: import { Types } from 'varadharajcredopay'
+//         new Types.ObjectId(...)           — as a value (constructor)
+//         id: string | Types.ObjectId       — as a type
+export declare namespace Types {
+  type ObjectId = import('mongodb').ObjectId;
+  const ObjectId: typeof import('mongodb').ObjectId;
+  const String: typeof StringSchemaType;
+  const Number: typeof NumberSchemaType;
+  const Boolean: typeof BooleanSchemaType;
+  const Array: typeof ArraySchemaType;
+  const Buffer: typeof BufferSchemaType;
+  const Date: typeof DateSchemaType;
+  const Mixed: typeof MixedSchemaType;
+  const Map: typeof MapSchemaType;
+}

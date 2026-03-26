@@ -258,4 +258,5 @@ module.exports.ObjectId    = require('mongodb').ObjectId;
 module.exports.model       = mongoosify.model;
 module.exports.connect     = (uri, opts) => connection.connect(uri, opts).then(() => mongoosify);
 module.exports.disconnect  = () => connection.disconnect();
+module.exports.Connection  = connection.constructor;
 module.exports.default     = mongoosify;   // for ESM interop: import mongoose from '...'
