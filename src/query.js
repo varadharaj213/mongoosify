@@ -1,6 +1,7 @@
 'use strict';
 
 const { ObjectId } = require('mongodb');
+const { sanitize, isObjectIdLike, toDriverObjectId } = require('./bson-sanitize');
 
 class Query {
   constructor(model, op, filter = {}) {

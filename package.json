@@ -1,6 +1,6 @@
 {
   "name": "varadharajcredopay",
-  "version": "1.2.14",
+  "version": "1.2.20",
   "description": "A Mongoose-like ODM for MongoDB — built from scratch. Supports JS and TypeScript.",
   "main": "src/index.js",
   "types": "ts-src/index.d.ts",

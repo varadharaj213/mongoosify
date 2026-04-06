@@ -1,6 +1,9 @@
 'use strict';
 
+// ─── BSON-version-agnostic ObjectId helpers ───────────────────────────────────
 const { ObjectId } = require('mongodb');
+const { sanitize, isObjectIdLike, toDriverObjectId } = require('./bson-sanitize');
+
 const Query    = require('./query');
 const Document = require('./document');
 const connection = require('./connection');
@@ -781,18 +784,15 @@ function createModel(modelName, schema, conn, explicitCollectionName) {
 
 function _castId(id) {
   if (!id) return id;
-  if (id instanceof ObjectId) return id;
+  if (isObjectIdLike(id)) return toDriverObjectId(id);
   try { return new ObjectId(id); }
   catch { return id; }
 }
 
 function _normalizeFilter(filter) {
   if (!filter) return {};
-  // Cast _id if present
-  if (filter._id && !(filter._id instanceof ObjectId) && typeof filter._id === 'string') {
-    try { filter = { ...filter, _id: new ObjectId(filter._id) }; } catch {}
-  }
-  return filter;
+  // Full recursive sanitize — handles _id and any nested ObjectId fields
+  return sanitize(filter);
 }
 
 /**

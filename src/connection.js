@@ -2,6 +2,43 @@
 
 const { MongoClient } = require('mongodb');
 const EventEmitter = require('events');
+const { sanitizeArgs } = require('./bson-sanitize');
+
+// ─── Methods on MongoDB Collection that accept filter/doc arguments ───────────
+// We wrap these so any foreign bson ObjectId is sanitized before hitting the driver.
+const COLLECTION_WRITE_METHODS = [
+  'find', 'findOne',
+  'insertOne', 'insertMany',
+  'updateOne', 'updateMany', 'replaceOne',
+  'deleteOne', 'deleteMany',
+  'findOneAndUpdate', 'findOneAndReplace', 'findOneAndDelete',
+  'countDocuments', 'estimatedDocumentCount',
+  'distinct', 'aggregate',
+  'bulkWrite', 'watch',
+  'createIndex', 'createIndexes', 'dropIndex', 'dropIndexes',
+];
+
+/**
+ * Wraps a MongoDB Collection instance with a Proxy that sanitizes all
+ * arguments on every method call — converting foreign bson ObjectIds
+ * (from bson 4.x / 5.x) to the driver's own bson 6.x ObjectId.
+ *
+ * This is transparent: the rest of the codebase never needs to change.
+ */
+function wrapCollection(col) {
+  return new Proxy(col, {
+    get(target, prop) {
+      const val = target[prop];
+      // Only intercept known methods; pass through everything else (properties, symbols)
+      if (typeof val === 'function' && COLLECTION_WRITE_METHODS.includes(prop)) {
+        return function (...args) {
+          return val.apply(target, sanitizeArgs(args));
+        };
+      }
+      return typeof val === 'function' ? val.bind(target) : val;
+    },
+  });
+}
 
 // Connection ready states — identical to Mongoose
 const STATES = {
@@ -134,7 +171,7 @@ class Connection extends EventEmitter {
   }
 
   collection(name) {
-    return this.getDb().collection(name);
+    return wrapCollection(this.getDb().collection(name));
   }
 
   // ─── model() (on connection, like conn.model()) ───────────────────────

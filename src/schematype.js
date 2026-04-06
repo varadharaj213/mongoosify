@@ -193,7 +193,8 @@ class ObjectIdSchemaType extends SchemaType {
   constructor(key, options) { super(key, options, 'ObjectId'); }
   cast(val) {
     if (val === null || val === undefined) return val;
-    if (val instanceof ObjectId) return val;
+    const { isObjectIdLike, toDriverObjectId } = require('./bson-sanitize');
+    if (isObjectIdLike(val)) return toDriverObjectId(val);
     try { return new ObjectId(val); }
     catch { throw new Error(`Cast to ObjectId failed for value "${val}" at path "${this.path}"`); }
   }
