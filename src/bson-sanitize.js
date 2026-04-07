@@ -82,7 +82,12 @@ function sanitize(val) {
     // Plain object — recurse into values
     const out = {};
     for (const key of Object.keys(val)) {
-      out[key] = sanitize(val[key]);
+      const v = val[key];
+      // Auto-cast string _id values to ObjectId (Mongoose-compatible behaviour)
+      if (key === '_id' && typeof v === 'string' && v.length === 24) {
+        try { out[key] = new ObjectId(v); continue; } catch {}
+      }
+      out[key] = sanitize(v);
     }
     return out;
   }

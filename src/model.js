@@ -383,7 +383,11 @@ function createModel(modelName, schema, conn, explicitCollectionName) {
       const refModel = _resolveModel(refModelName);
       if (refModel) {
         const ids = arr.map(d => _getNestedValue(d, popPath)).filter(Boolean);
-        if (ids.length) {
+        // If no ids found and popModel was explicitly provided, the path is likely a virtual —
+        // fall through to virtual populate rather than returning early with no data.
+        if (!ids.length && popModel) {
+          // fall through to virtual populate below
+        } else if (ids.length) {
           const findFilter = { _id: { $in: ids } };
           let refDocs;
           if (popSelect) {
@@ -413,8 +417,10 @@ function createModel(modelName, schema, conn, explicitCollectionName) {
               }
             }
           }
+          return docs;
+        } else {
+          return docs;
         }
-        return docs;
       }
     }
 
@@ -426,7 +432,9 @@ function createModel(modelName, schema, conn, explicitCollectionName) {
       const prefix = pathParts.slice(0, pathParts.length - 1).join('.');
       const fullLocalField = prefix ? `${prefix}.${localField}` : localField;
 
-      const refModel = _resolveModel(ref);
+      // Use the explicitly-passed model instance if provided (handles cross-connection models
+      // that are not registered on this connection and cannot be resolved by name).
+      const refModel = popModel ? _resolveModel(popModel) : _resolveModel(ref);
       if (refModel) {
         const localValues = arr.map(d => _getNestedValue(d, fullLocalField)).filter(v => v != null);
         if (localValues.length) {
